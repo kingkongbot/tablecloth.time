@@ -83,6 +83,45 @@
               :tgt-category  tgt-cat})))]
      (tcc/column data))))
 
+(defn replace-time-zone
+  "Stamp a timezone onto a naive LocalDateTime column, preserving local values.
+   
+   The local date/time values are unchanged — this just attaches zone metadata.
+   Use this when you know what timezone naive timestamps represent.
+   
+   (replace-time-zone col \"UTC\")
+   ;; LocalDateTime 13:00 → ZonedDateTime 13:00Z[UTC]
+   
+   See also: `convert-time-zone` for converting between zones."
+  [col zone]
+  (let [col (coerce-column col)
+        dtype (datatypes/get-datatype col)
+        _ (when (not= dtype :local-date-time)
+            (throw (ex-info "replace-time-zone expects a :local-date-time column. Use convert-time to convert first."
+                           {:expected :local-date-time :actual dtype})))
+        zone-id (temporal/coerce-zone-id zone)]
+    (tcc/column
+     (dtype/emap #(.atZone ^LocalDateTime % zone-id) :zoned-date-time col))))
+
+(defn convert-time-zone
+  "Convert a ZonedDateTime column to another timezone, preserving the instant.
+   
+   The underlying instant is unchanged — only the local representation shifts.
+   
+   (convert-time-zone col \"Australia/Melbourne\")
+   ;; ZonedDateTime 13:00Z[UTC] → ZonedDateTime 00:00+11:00[Australia/Melbourne]
+   
+   See also: `replace-time-zone` for stamping zone onto naive datetimes."
+  [col zone]
+  (let [col (coerce-column col)
+        dtype (datatypes/get-datatype col)
+        _ (when (not= dtype :zoned-date-time)
+            (throw (ex-info "convert-time-zone expects a :zoned-date-time column. For naive LocalDateTime, use replace-time-zone first."
+                           {:expected :zoned-date-time :actual dtype})))
+        zone-id (temporal/coerce-zone-id zone)]
+    (tcc/column
+     (dtype/emap #(.withZoneSameInstant ^ZonedDateTime % zone-id) :zoned-date-time col))))
+
 (defn- local-date->epoch-month [col-ld]
   (let [col-year (dtdt-ops/long-temporal-field :years col-ld)
         col-year-month (dtdt-ops/long-temporal-field :months col-ld)
@@ -160,7 +199,7 @@
   "Floor a `col` of time values to the nearest lower multiple of (interval × unit).
 
     Arities:
-    - (down-to-nearest interval unit) => returns a function f; (f col) or (f x col)
+    - (down-to-nearest interval unit) => returns a function f; (f col) or (f col opts)
     - (down-to-nearest col interval unit)
     - (down-to-nearest col interval unit opts)
 
@@ -170,6 +209,12 @@
     - If x is a number (millis), returns a number.
     - Units: :milliseconds :seconds :minutes :hours :days :weeks, and :months/:quarters/:years (calendar-aware).
     - LocalDate/LocalDateTime use the system default zone by default; pass opts with :zone to override."
+  ([interval unit]
+   (fn
+     ([col] (down-to-nearest col interval unit {}))
+     ([col opts] (down-to-nearest col interval unit opts))))
+  ([col interval unit]
+   (down-to-nearest col interval unit {}))
   ([col interval unit opts]
    (let [col (coerce-column col)
          original-type (datatypes/get-datatype col)
@@ -185,7 +230,7 @@
                           ;; epoch-milliseconds
                           (fun/- millis-col (fun/rem millis-col divisor))
                           :epoch-milliseconds)]
-         (convert-time rounded-col original-type (:zone zone)))
+         (convert-time rounded-col original-type opts))
        (units/calendar-unit? unit)
        (let [col (convert-time col :local-date)
              rounded-col (case unit

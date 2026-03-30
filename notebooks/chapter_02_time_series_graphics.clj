@@ -15,8 +15,7 @@
             [tech.v3.dataset :as ds]
             [scicloj.tableplot.v1.plotly :as plotly]
             [scicloj.kindly.v4.kind :as kind]
-            [tablecloth.time.api :as time-api]
-            [tablecloth.time.column.api :as time-col])
+            [tablecloth.time.api :as tct])
   (:import [java.time LocalDate]))
 
 ;; ## 2.1 — Loading data (tsibble equivalents)
@@ -67,11 +66,24 @@ ansett
 aus-production
 
 ;; ### vic_elec — Victorian half-hourly electricity demand
-;; Time column is "2011-12-31 13:00:00" — not auto-parsed by tablecloth.
-;; Use tc/convert-types with a format pattern to parse it.
+;;
+;; **Timezone handling:** The CSV stores timestamps in UTC (e.g., "2011-12-31 13:00:00"),
+;; but they represent Melbourne local events. We need to convert to Melbourne time
+;; so that seasonal patterns (daily/weekly) align with local clock time.
+;;
+;; The conversion is two steps:
+;; 1. `replace-time-zone "UTC"` — stamps UTC onto the naive LocalDateTime
+;;    (13:00 becomes 13:00 UTC, no value change)
+;; 2. `convert-time-zone "Australia/Melbourne"` — shifts to Melbourne local time
+;;    (13:00 UTC → 00:00 Melbourne next day, since Melbourne is UTC+11 in summer)
+;;
+;; After this, `Time` is a ZonedDateTime in Melbourne timezone, and hour extraction
+;; gives local hours (0 = midnight Melbourne, not 13 = UTC).
 (def vic-elec
   (-> (load-fpp3 "vic_elec")
-      (tc/convert-types "Time" [:local-date-time "yyyy-MM-dd HH:mm:ss"])))
+      (tc/convert-types "Time" [:local-date-time "yyyy-MM-dd HH:mm:ss"])
+      (tct/replace-time-zone "Time" "UTC")
+      (tct/convert-time-zone "Time" "Australia/Melbourne")))
 vic-elec
 
 ;; ### olympic_running — Olympic running times
@@ -123,7 +135,8 @@ olympic-running
 ;; ### Australian quarterly beer production (seasonal + no trend)
 (def recent-beer
   (-> aus-production
-      (tc/select-rows #(>= (.getYear (get % "Quarter")) 2000))
+      (tct/add-time-columns "Quarter" {:year "Year"})
+      (tc/select-rows #(>= (get % "Year") 2000))
       (tc/select-columns ["Quarter" "Beer"])))
 
 (-> recent-beer
@@ -136,8 +149,9 @@ olympic-running
 
 (def google-2015
   (-> gafa
+      (tct/add-time-columns "Date" {:year "Year"})
       (tc/select-rows #(and (= "GOOG" (get % "Symbol"))
-                            (= (.getYear (get % "Date")) 2015)))))
+                            (= (get % "Year") 2015)))))
 
 ;; Daily closing price
 (-> google-2015
@@ -168,7 +182,7 @@ olympic-running
 
 (def a10-seasonal
   (-> a10
-      (time-api/add-time-columns "Month" {:year "Year" :month "MonthNum"})))
+      (tct/add-time-columns "Month" {:year "Year" :month "MonthNum"})))
 
 ;; Year is int64 — tableplot treats numeric columns as continuous color scales.
 ;; Convert to string so it's treated as categorical (one line per year).
@@ -196,21 +210,21 @@ olympic-running
 ;; calendar date of the timestamp. We derive all groupings from the Time column.
 (def vic-elec-with-fields
   (-> vic-elec
-      (time-api/add-time-columns "Time"
-                                 {;; Basic fields
-                                  :day-of-week "DayOfWeek"
-                                  :day-of-year "DayOfYear"
-                                  :week-of-year "WeekOfYear"
-                                  :year "Year"
+      (tct/add-time-columns "Time"
+                            {;; Basic fields
+                             :day-of-week "DayOfWeek"
+                             :day-of-year "DayOfYear"
+                             :week-of-year "WeekOfYear"
+                             :year "Year"
          ;; Computed fields for seasonal plots
-                                  :hour-fractional "HourOfDay"
-                                  :daily-phase "DailyPhase"
-                                  :weekly-phase "WeeklyPhase"
-                                  :week-of-year-index "WeekIndex"
-                                  :date-string "TimeDate"
-                                  :year-string "YearStr"
-                                  :week-string "WeekLabel"
-                                  :year-week-string "YearWeek"})))
+                             :hour-fractional "HourOfDay"
+                             :daily-phase "DailyPhase"
+                             :weekly-phase "WeeklyPhase"
+                             :week-of-year-index "WeekIndex"
+                             :date-string "TimeDate"
+                             :year-string "YearStr"
+                             :week-string "WeekLabel"
+                             :year-week-string "YearWeek"})))
 
 ;; ### Helper: seasonal-plot-spec
 ;; Generate a Plotly spec for seasonal plots using tableplot as the base.
@@ -388,7 +402,7 @@ olympic-running
 ;; Build the subseries plot
 (def a10-with-fields
   (-> a10
-      (time-api/add-time-columns "Month" {:year "Year" :month "MonthNum"})))
+      (tct/add-time-columns "Month" {:year "Year" :month "MonthNum"})))
 
 (def a10-grouped
   (-> a10-with-fields
@@ -406,7 +420,7 @@ olympic-running
 
 (def a10-subseries-traces (make-subseries-traces a10-grouped "Year" "Cost"))
 (def a10-subseries-layout (make-subseries-layout 12 "Subseries: Australian antidiabetic drug sales"
-                                                  :y-range a10-y-range))
+                                                 :y-range a10-y-range))
 
 (kind/plotly
  {:data a10-subseries-traces
@@ -419,7 +433,22 @@ olympic-running
 
 (def vic-elec-2014
   (-> vic-elec
-      (tc/select-rows #(= (.getYear (get % "Time")) 2014))))
+      (tct/add-time-columns "Time" {:year "Year"})
+      (tc/select-rows #(= (get % "Year") 2014))))
+
+(-> vic-elec-2014
+    (tct/slice "Time" "2014-01-01" "2014-12-31")
+    (plotly/base {:=width 600})
+    (plotly/layer-line {:=x "Time"
+                        :=y "Demand"
+                        :=title "Half-hour electricity demand: Victoria"}))
+
+(-> vic-elec-2014
+    (tct/slice "Time" "2014-01-01" "2014-12-31")
+    (plotly/base {:=width 600})
+    (plotly/layer-line {:=x "Time"
+                        :=y "Temperature"
+                        :=title "Half-hourly temperatures: Melboure, Australia"}))
 
 (-> vic-elec-2014
     (plotly/layer-point {:=x "Temperature"
@@ -463,7 +492,7 @@ visitors-by-state
 ;; Using tablecloth.time.api/add-lags with auto-drop of missing values:
 ;; Note: add-lags creates keyword columns like :Beer_lag4
 (-> recent-beer
-    (time-api/add-lags "Beer" [4])
+    (tct/add-lags "Beer" [4])
     (plotly/layer-point {:=x "Beer_lag4"
                          :=y "Beer"
                          :=title "Lag 4 plot: Australian beer production"
