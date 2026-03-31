@@ -426,6 +426,27 @@ olympic-running
  {:data a10-subseries-traces
   :layout a10-subseries-layout})
 
+
+
+;; ## Example: Australian Tourism (Figure 2.9)
+;; 
+;; Quarterly overnight trips by State, filtered to Holiday purpose.
+;; Uses tc/sum as aggregator directly on grouped dataset.
+
+(def tourism (load-fpp3 "tourism"))
+
+(-> tourism
+    (tc/select-rows #(= (get % "Purpose") "Holiday"))
+    (tc/group-by ["Quarter" "State"])
+    (tc/sum ["Trips"])
+    (tc/rename-columns {"summary" "Trips"})
+    (tc/order-by "Quarter")
+    (plotly/layer-line {:=x "Quarter"
+                        :=y "Trips"
+                        :=color "State"
+                        :=title "Australian domestic holidays"
+                        :=y-title "Overnight trips ('000)"}))
+
 ;; ## 2.6 — Scatterplots
 ;;
 ;; R: `ggplot(aes(x = Temperature, y = Demand)) + geom_point()`
