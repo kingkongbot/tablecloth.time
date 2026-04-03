@@ -447,6 +447,134 @@ olympic-running
                         :=title "Australian domestic holidays"
                         :=y-title "Overnight trips ('000)"}))
 
+;; ## Figure 2.10 — Vertical Faceted Plot (Trips by State, colored by Region)
+;;
+;; Plotly doesn't have declarative faceting, so we build it manually:
+;; - Vertical stack of subplots (one per State)
+;; - Multiple lines per subplot (one per Region, colored)
+;; - Shared x-axis, independent y-axes
+;; - Facet labels on the right
+
+(defn make-vertical-facet-traces
+  "Generate Plotly traces for a vertically-faceted line plot.
+   
+   Arguments:
+   - ds: dataset with columns for x, y, facet, and color
+   - facet-col: column to facet by (e.g. \"State\") - creates one subplot per value
+   - x-col: x-axis column (e.g. \"Quarter\")
+   - y-col: y-axis column (e.g. \"Trips\")
+   - color-col: column to color lines by (e.g. \"Region\")
+   
+   Returns vector of Plotly trace maps, each assigned to appropriate axes."
+  [ds facet-col x-col y-col color-col]
+  (let [facet-values (sort (distinct (ds facet-col)))
+        color-values (sort (distinct (ds color-col)))
+        ;; Simple color palette
+        colors ["#1f77b4" "#ff7f0e" "#2ca02c" "#d62728" "#9467bd"
+                "#8c564b" "#e377c2" "#7f7f7f" "#bcbd22" "#17becf"
+                "#aec7e8" "#ffbb78" "#98df8a" "#ff9896" "#c5b0d5"
+                "#c49c94" "#f7b6d2" "#c7c7c7" "#dbdb8d" "#9edae5"]
+        color-map (zipmap color-values (cycle colors))]
+    (->> (for [[facet-idx facet-val] (map-indexed vector facet-values)
+               color-val color-values]
+           (let [axis-num (inc facet-idx)
+                 yaxis (if (= axis-num 1) "y" (str "y" axis-num))
+                 subset (-> ds
+                            (tc/select-rows #(and (= (get % facet-col) facet-val)
+                                                  (= (get % color-col) color-val)))
+                            (tc/order-by x-col))
+                 xs (vec (subset x-col))
+                 ys (vec (subset y-col))]
+             (when (seq xs)
+               {:x xs
+                :y ys
+                :type "scatter"
+                :mode "lines"
+                :line {:width 1 :color (color-map color-val)}
+                :yaxis yaxis
+                :name color-val
+                :legendgroup color-val
+                :showlegend (= facet-idx 0)})))  ; only show legend for first facet
+         (remove nil?)
+         vec)))
+
+(defn make-vertical-facet-layout
+  "Generate layout for vertically-stacked subplots.
+   
+   Arguments:
+   - facet-names: seq of facet values (e.g. [\"ACT\" \"NSW\" ...])
+   - title: plot title
+   
+   Options:
+   - :height - total plot height (default 800)
+   - :width - plot width (default 900)
+   - :x-title - x-axis label
+   - :y-title - y-axis label (shown on middle subplot)"
+  [facet-names title & {:keys [height width x-title y-title]
+                        :or {height 800 width 900}}]
+  (let [n (count facet-names)
+        subplot-height (/ 0.85 n)
+        gap 0.02
+        ;; Facet label annotations (on the right)
+        facet-annotations
+        (mapv (fn [idx facet-name]
+                (let [top (- 0.95 (* idx (+ subplot-height gap)))
+                      center (- top (/ subplot-height 2))]
+                  {:x 1.02
+                   :y center
+                   :xref "paper"
+                   :yref "paper"
+                   :text facet-name
+                   :showarrow false
+                   :font {:size 10}
+                   :textangle 0}))
+              (range n)
+              facet-names)]
+    (reduce
+     (fn [layout idx]
+       (let [axis-num (inc idx)
+             y-key (if (= axis-num 1) :yaxis (keyword (str "yaxis" axis-num)))
+             top (- 0.95 (* idx (+ subplot-height gap)))
+             bottom (- top subplot-height)
+             middle-subplot? (= idx (quot n 2))]
+         (assoc layout y-key
+                (cond-> {:domain [bottom top]
+                         :anchor "x"
+                         :tickfont {:size 8}}
+                  middle-subplot? (assoc :title (or y-title ""))
+                  (not middle-subplot?) (assoc :title "")))))
+     {:title title
+      :showlegend true
+      :legend {:x 1.08 :y 0.5 :font {:size 8}}
+      :height height
+      :width width
+      :margin {:r 150}  ; room for facet labels and legend
+      :xaxis {:domain [0.05 0.95]
+              :title (or x-title "")
+              :tickfont {:size 9}}
+      :annotations facet-annotations}
+     (range n))))
+
+;; Build Figure 2.10: Holiday trips faceted by State, colored by Region
+(def tourism-holiday
+  (-> tourism
+      (tc/select-rows #(= (get % "Purpose") "Holiday"))))
+
+(def fig-2-10-traces
+  (make-vertical-facet-traces tourism-holiday "State" "Quarter" "Trips" "Region"))
+
+(def fig-2-10-layout
+  (make-vertical-facet-layout
+   (sort (distinct (tourism-holiday "State")))
+   "Australian domestic tourism: Holiday trips"
+   :x-title "Quarter"
+   :y-title "Trips ('000)"
+   :height 900))
+
+(kind/plotly
+ {:data fig-2-10-traces
+  :layout fig-2-10-layout})
+
 ;; ## 2.6 — Scatterplots
 ;;
 ;; R: `ggplot(aes(x = Temperature, y = Demand)) + geom_point()`
