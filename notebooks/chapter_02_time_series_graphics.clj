@@ -558,17 +558,23 @@ olympic-running
 ;; Build Figure 2.10: Holiday trips faceted by State, colored by Region
 (def tourism-holiday
   (-> tourism
+      (tct/add-time-columns :Quarter {:year :Year
+                                      :quarter :QuarterNum})
       (tc/select-rows #(= (:Purpose %) "Holiday"))))
 
 (tc/head tourism-holiday)
-
 
    ;; - facet-col: column to facet by (e.g. \"State\") - creates one subplot per value
    ;; - x-col: x-axis column (e.g. \"Quarter\")
    ;; - y-col: y-axis column (e.g. \"Trips\")
    ;; - color-col: column to color lines by (e.g. \"Region\")
 (def fig-2-10-traces
-  (make-vertical-facet-traces tourism-holiday :State :Quarter :Trips :Region))
+  (make-vertical-facet-traces
+   tourism-holiday
+   :State
+   :Quarter
+   :Trips
+   :Year))
 
 (def fig-2-10-layout
   (make-vertical-facet-layout
