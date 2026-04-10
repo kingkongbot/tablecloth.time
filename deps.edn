@@ -13,4 +13,4 @@
   {:extra-paths ["src"]
    :extra-deps {org.scicloj/clay         {:mvn/version "2.0.11"}
                 org.scicloj/tableplot    {:mvn/version "1-beta9.1"}
-                org.scicloj/napkinsketch {:mvn/version "0.1.0"}}}}}
+                io.github.scicloj/napkinsketch {:local/root "../napkinsketch"}}}}}

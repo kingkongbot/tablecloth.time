@@ -20,21 +20,39 @@
 (defn load-fpp3
   "Load one of the fpp3 datasets from CSV."
   [name]
-  (tc/dataset (str "data/fpp3/" name ".csv")))
+  (tc/dataset (str "data/fpp3/" name ".csv") {:key-fn keyword}))
 
 ;; ## 2.2 — Time Plots (Figure 2.2)
 ;;
 ;; The a10 dataset: monthly antidiabetic drug sales in Australia.
 ;; R: autoplot(a10, Cost)
 
-(def a10 (load-fpp3 "a10"))
+;; Load PBS and derive a10 (antidiabetic drugs, code A10)
+(def PBS (load-fpp3 "PBS"))
 
-;; Simple time plot — line chart with Month on x, Cost on y:
+PBS
+
+(def a10
+  (-> PBS
+      (tc/select-rows #(= "A10" (% :ATC2)))
+      (tc/select-columns [:Month :Concession :Type :Cost])
+      (tc/group-by [:Month])
+      (tc/sum [:Cost])
+      #_(tc/add-column "Cost" #(dfn// (% "TotalC") 1e6))))
+
+a10
 
 (-> a10
-    (sk/lay-line :Month :Cost)
+    :Month)
+
+
+(-> a10
+    (tc/add-column :Month
+                    #(-> % :Month tech.v3.datatype.packing/unpack))
+    (sk/lay-line :Month :summary)
     (sk/options {:title "Australian antidiabetic drug sales"
                  :width 600
-                 :height 400}))
+                 :height 400})
+    #_(sk/plan))
 
 ;; TODO: Add more figures here...

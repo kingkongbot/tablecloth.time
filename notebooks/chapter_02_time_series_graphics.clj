@@ -560,7 +560,9 @@ olympic-running
   (-> tourism
       (tct/add-time-columns :Quarter {:year :Year
                                       :quarter :QuarterNum})
-      (tc/select-rows #(= (:Purpose %) "Holiday"))))
+      (tc/select-rows #(= (:Purpose %) "Holiday"))
+      (tc/order-by :Year)
+      ))
 
 (tc/head tourism-holiday)
 
@@ -572,7 +574,7 @@ olympic-running
   (make-vertical-facet-traces
    tourism-holiday
    :State
-   :Quarter
+   :QuarterNum
    :Trips
    :Year))
 
